@@ -55,6 +55,7 @@ class WeightsInput(BaseModel):
     device_entropy: float
     geo_jump: float
     time_anomaly: float
+    ml_anomaly: float
 
 
 # ──────────────────────────────────────────────────────
@@ -149,7 +150,7 @@ def get_weights():
 
 @app.post("/api/config/weights")
 def set_weights(w: WeightsInput):
-    total = w.velocity + w.merchant_trust + w.device_entropy + w.geo_jump + w.time_anomaly
+    total = w.velocity + w.merchant_trust + w.device_entropy + w.geo_jump + w.time_anomaly + w.ml_anomaly
     if total == 0:
         total = 1.0
 
@@ -158,6 +159,7 @@ def set_weights(w: WeightsInput):
     state.weights["device_entropy"] = round(w.device_entropy / total, 4)
     state.weights["geo_jump"] = round(w.geo_jump / total, 4)
     state.weights["time_anomaly"] = round(w.time_anomaly / total, 4)
+    state.weights["ml_anomaly"] = round(w.ml_anomaly / total, 4)
 
     rescore_all()
 

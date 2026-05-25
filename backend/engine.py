@@ -6,9 +6,13 @@ A weighted combiner fuses them into a final risk_score (0-100).
 """
 
 import uuid
+import os
 from datetime import datetime, timedelta
 from dateutil.parser import parse as parse_dt
 from typing import Dict, List, Any, Tuple
+
+import joblib
+import pandas as pd
 
 import state
 
@@ -26,7 +30,17 @@ GEO_CHANGE = "GEO_CHANGE"
 MIDNIGHT_TXN = "MIDNIGHT_TXN"
 WEEKEND_TXN = "WEEKEND_TXN"
 LINKED_TO_FRAUD_NODE = "LINKED_TO_FRAUD_NODE"
+ML_ANOMALY = "ML_ANOMALY"
+ML_MODEL_UNAVAILABLE = "ML_MODEL_UNAVAILABLE"
 SAFE = "SAFE"
+
+FEATURE_COLUMNS = ["amount", "hour", "is_new_device", "is_new_payee"]
+MODEL_PATH = os.path.join(os.path.dirname(__file__), "ml", "fraud_model.pkl")
+
+try:
+    ml_model = joblib.load(MODEL_PATH)
+except Exception:
+    ml_model = None
 
 # ──────────────────────────────────────────────────────
 # TIER THRESHOLDS
@@ -148,6 +162,25 @@ def _time_anomaly(ts: datetime) -> Tuple[int, str]:
     return 0, SAFE
 
 
+# SIGNAL LAYER 6 - ML ANOMALY
+def _ml_anomaly(amount: float, ts: datetime, is_new_device: bool, is_new_payee: bool) -> Tuple[int, str]:
+    """Isolation Forest anomaly signal trained on amount, hour, device, and payee features."""
+    if ml_model is None:
+        return 0, ML_MODEL_UNAVAILABLE
+
+    features = pd.DataFrame([{
+        "amount": amount,
+        "hour": ts.hour,
+        "is_new_device": int(is_new_device),
+        "is_new_payee": int(is_new_payee),
+    }], columns=FEATURE_COLUMNS)
+
+    prediction = ml_model.predict(features)[0]
+    if prediction == -1:
+        return 95, ML_ANOMALY
+    return 0, SAFE
+
+
 # ──────────────────────────────────────────────────────
 # COMPOSITE SCORER
 # ──────────────────────────────────────────────────────
@@ -165,12 +198,19 @@ def score_transaction(txn: Dict[str, Any]) -> Dict[str, Any]:
 
     txn_id = txn.get("txn_id") or f"TXN-{uuid.uuid4().hex[:12].upper()}"
 
+    # Capture history flags before rule layers mutate state.
+    last_device = state.device_history.get(payer_id)
+    prior_payee_count = state.merchant_history.get(payer_id, {}).get(payee_id, 0)
+    is_new_device = last_device is not None and last_device != device_id
+    is_new_payee = prior_payee_count == 0
+
     # Run each layer
     vel_score, vel_reason = _velocity(payer_id, amount, ts)
     mer_score, mer_reason = _merchant_trust(payer_id, payee_id, amount)
     dev_score, dev_reason = _device_entropy(payer_id, device_id, payee_id)
     geo_score, geo_reason = _geo_jump(payer_id, location, ts)
     tim_score, tim_reason = _time_anomaly(ts)
+    ml_score, ml_reason = _ml_anomaly(amount, ts, is_new_device, is_new_payee)
 
     w = state.weights
 
@@ -180,13 +220,14 @@ def score_transaction(txn: Dict[str, Any]) -> Dict[str, Any]:
         {"name": "DEVICE_ENTROPY", "sub_score": dev_score, "reason": dev_reason, "weight": w["device_entropy"]},
         {"name": "GEO_JUMP", "sub_score": geo_score, "reason": geo_reason, "weight": w["geo_jump"]},
         {"name": "TIME_ANOMALY", "sub_score": tim_score, "reason": tim_reason, "weight": w["time_anomaly"]},
+        {"name": "ML_ANOMALY", "sub_score": ml_score, "reason": ml_reason, "weight": w["ml_anomaly"]},
     ]
 
     raw_score = sum(s["sub_score"] * s["weight"] for s in signals)
     final_score = int(min(max(round(raw_score), 0), 100))
 
     # Top reasons (non-SAFE, sorted by sub_score descending)
-    fired = [s for s in signals if s["reason"] != SAFE]
+    fired = [s for s in signals if s["reason"] not in (SAFE, ML_MODEL_UNAVAILABLE)]
     fired.sort(key=lambda s: s["sub_score"], reverse=True)
     top_reasons = [s["reason"] for s in fired]
 

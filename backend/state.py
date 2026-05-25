@@ -10,11 +10,12 @@ from typing import Dict, List, Set, Any
 # CONFIGURATION — signal weights (mutable via API)
 # ──────────────────────────────────────────────────────
 weights: Dict[str, float] = {
-    "velocity": 0.30,
-    "merchant_trust": 0.25,
-    "device_entropy": 0.20,
-    "geo_jump": 0.15,
+    "velocity": 0.25,
+    "merchant_trust": 0.20,
+    "device_entropy": 0.15,
+    "geo_jump": 0.10,
     "time_anomaly": 0.10,
+    "ml_anomaly": 0.20,
 }
 
 # ──────────────────────────────────────────────────────
