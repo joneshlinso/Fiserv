@@ -12,8 +12,9 @@
   --accent-purple-dim: rgba(167,139,250,0.15);
   --accent-green:  #4ADE80;
   --accent-green-dim: rgba(74,222,128,0.12);
+  /* ── a11y fix: #9CA3AF gives ~5.0:1 contrast on #0D0D0F (WCAG AA) ── */
   --text-primary:  #F1F1F3;
-  --text-secondary:#8B8B9A;
+  --text-secondary:#9CA3AF;
   --text-tertiary: #55556A;
   --danger:        #FF4D6A;
   --danger-dim:    rgba(255,77,106,0.12);
@@ -22,6 +23,17 @@
   --radius-lg:     20px;
   --radius-md:     12px;
   --radius-sm:     8px;
+  /* ── Compact Mode tokens ── */
+  --card-padding:  24px;
+  --row-py:        16px;
+  --stat-size:     28px;
+}
+
+/* Compact Mode: set data-compact="true" on root div */
+[data-compact="true"] {
+  --card-padding: 16px;
+  --row-py:       10px;
+  --stat-size:    22px;
 }
 
 @layer base {
@@ -57,8 +69,9 @@
 
 .stat-number {
   font-family: 'DM Mono', monospace;
-  font-size: 28px;
+  font-size: var(--stat-size);
   font-weight: 500;
+  transition: font-size 0.2s ease;
 }
 
 .table-header {
@@ -100,8 +113,8 @@
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  padding: 24px;
-  transition: border-color 0.2s ease, background 0.2s ease;
+  padding: var(--card-padding);
+  transition: border-color 0.2s ease, background 0.2s ease, padding 0.2s ease;
 }
 .premium-card:hover {
   border-color: var(--border-hover);
@@ -109,6 +122,13 @@
 
 .premium-card-small {
   border-radius: var(--radius-md);
+}
+
+/* ── Table row padding driven by compact token ── */
+.table-row-cell {
+  padding-top: calc(var(--row-py) * 1px);
+  padding-bottom: calc(var(--row-py) * 1px);
+  transition: padding 0.2s ease;
 }
 
 /* ── Custom scrollbar ── */
@@ -173,4 +193,81 @@
 }
 .animate-slide-up-fade {
   animation: slideUpFadeIn 0.3s ease-out forwards;
+}
+
+/* ── Stacked bar chart segments ── */
+.risk-bar-segment {
+  transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ── Inline validation ── */
+.field-valid {
+  border-color: var(--accent-green) !important;
+}
+.field-invalid {
+  border-color: var(--danger) !important;
+  box-shadow: 0 0 0 1px rgba(255,77,106,0.25);
+}
+.field-error-msg {
+  font-size: 11px;
+  color: var(--danger);
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* ── Compact Mode toggle button ── */
+.compact-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-secondary);
+  transition: all 0.2s ease;
+  width: 100%;
+  justify-content: space-between;
+}
+.compact-toggle:hover {
+  border-color: var(--border-hover);
+  color: var(--text-primary);
+}
+.compact-toggle.active {
+  border-color: var(--accent-purple);
+  background: var(--accent-purple-dim);
+  color: var(--accent-purple);
+}
+
+/* Toggle pill */
+.toggle-pill {
+  width: 28px;
+  height: 16px;
+  border-radius: 8px;
+  background: var(--border);
+  position: relative;
+  transition: background 0.2s ease;
+  flex-shrink: 0;
+}
+.toggle-pill.on {
+  background: var(--accent-purple);
+}
+.toggle-pill::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: white;
+  transition: transform 0.2s ease;
+}
+.toggle-pill.on::after {
+  transform: translateX(12px);
 }

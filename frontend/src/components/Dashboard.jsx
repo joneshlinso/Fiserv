@@ -1,6 +1,17 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { getTransactions, getStats } from '../api';
-import { Activity, ShieldAlert, CheckCircle, AlertTriangle } from 'lucide-react';
+import {
+  Activity, ShieldAlert, CheckCircle, AlertTriangle,
+  ShieldCheck, AlertOctagon,
+} from 'lucide-react';
+
+/* ── Risk tier icon map (a11y: icon + color, never color alone) ── */
+const TIER_CONFIG = {
+  LOW:      { bg: 'var(--accent-green-dim)',      col: 'var(--accent-green)',  Icon: ShieldCheck,  label: 'LOW' },
+  MEDIUM:   { bg: 'rgba(167,139,250,0.12)',        col: 'var(--accent-purple)', Icon: ShieldAlert,  label: 'MEDIUM' },
+  HIGH:     { bg: 'var(--warning-dim)',            col: 'var(--warning)',       Icon: AlertTriangle, label: 'HIGH' },
+  CRITICAL: { bg: 'var(--danger-dim)',             col: 'var(--danger)',        Icon: AlertOctagon,  label: 'CRITICAL' },
+};
 
 function RiskBar({ score }) {
   let color = 'var(--accent-green)';
@@ -20,36 +31,92 @@ function RiskBar({ score }) {
   );
 }
 
+/* ── a11y: icon + label badge so color is never the only signifier ── */
 function TierBadge({ tier }) {
-  let bg = 'var(--accent-green-dim)';
-  let col = 'var(--accent-green)';
-  
-  if (tier === 'MEDIUM') {
-    bg = 'rgba(167,139,250,0.12)';
-    col = 'var(--accent-purple)';
-  } else if (tier === 'HIGH') {
-    bg = 'var(--warning-dim)';
-    col = 'var(--warning)';
-  } else if (tier === 'CRITICAL') {
-    bg = 'var(--danger-dim)';
-    col = 'var(--danger)';
-  }
-
+  const cfg = TIER_CONFIG[tier] || TIER_CONFIG.LOW;
+  const { bg, col, Icon, label } = cfg;
   return (
-    <span 
-      className="badge-text px-3 py-1 rounded-[20px]" 
+    <span
+      className="badge-text px-2.5 py-1 rounded-[20px] inline-flex items-center gap-1"
       style={{ backgroundColor: bg, color: col }}
+      aria-label={`Risk tier: ${label}`}
     >
-      {tier}
+      <Icon size={11} strokeWidth={2.5} aria-hidden="true" />
+      {label}
     </span>
   );
 }
 
-export default function Dashboard() {
+/* ── Stacked Horizontal Bar Chart (replaces donut) ── */
+function RiskStackedBar({ stats }) {
+  if (!stats) return (
+    <div className="space-y-3">
+      {[...Array(3)].map((_, i) => <div key={i} className="skeleton w-full h-5 rounded" />)}
+    </div>
+  );
+
+  const total = Math.max(stats.total || 1, 1);
+  const critical = stats.critical_count || 0;
+  const high = Math.max((stats.flagged_count || 0) - critical, 0);
+  const safe = Math.max(total - (stats.flagged_count || 0), 0);
+
+  const tiers = [
+    { label: 'Critical', count: critical, color: 'var(--danger)',        bg: 'var(--danger-dim)' },
+    { label: 'High',     count: high,     color: 'var(--warning)',       bg: 'var(--warning-dim)' },
+    { label: 'Safe',     count: safe,     color: 'var(--accent-green)',  bg: 'var(--accent-green-dim)' },
+  ];
+
+  return (
+    <div className="space-y-2.5">
+      {/* Stacked bar */}
+      <div className="w-full h-6 flex rounded-[6px] overflow-hidden gap-[2px]" role="img" aria-label="Risk tier distribution bar chart">
+        {tiers.map(({ label, count, color }) => {
+          const pct = (count / total) * 100;
+          return pct > 0 ? (
+            <div
+              key={label}
+              className="risk-bar-segment h-full flex items-center justify-center"
+              style={{ width: `${pct}%`, backgroundColor: color, minWidth: count > 0 ? 4 : 0 }}
+              title={`${label}: ${count} (${pct.toFixed(1)}%)`}
+            />
+          ) : null;
+        })}
+      </div>
+
+      {/* Per-tier rows */}
+      {tiers.map(({ label, count, color, bg }) => {
+        const pct = ((count / total) * 100).toFixed(1);
+        return (
+          <div key={label} className="flex items-center gap-2">
+            <span
+              className="w-2 h-2 rounded-full flex-shrink-0"
+              style={{ backgroundColor: color }}
+              aria-hidden="true"
+            />
+            <span className="text-xs text-[var(--text-secondary)] w-14">{label}</span>
+            <div className="flex-1 h-1.5 bg-[var(--border)] rounded-full overflow-hidden">
+              <div
+                className="risk-bar-segment h-full rounded-full"
+                style={{ width: `${pct}%`, backgroundColor: color }}
+              />
+            </div>
+            <span className="mono text-xs" style={{ color }}>{count}</span>
+            <span className="text-[10px] text-[var(--text-tertiary)] w-10 text-right">{pct}%</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+export default function Dashboard({ compact = false }) {
   const [stats, setStats] = useState(null);
   const [transactions, setTransactions] = useState(null);
   const [expandedId, setExpandedId] = useState(null);
   const pollRef = useRef(null);
+
+  // Table row py driven by CSS custom property via compact mode
+  const rowPy = compact ? 'py-[10px]' : 'py-4';
 
   useEffect(() => {
     const fetchData = async () => {
@@ -68,38 +135,6 @@ export default function Dashboard() {
 
   const safeCount = stats ? Math.max(0, stats.total - stats.flagged_count) : 0;
 
-  // Render signal heatmap donut (simplified)
-  const renderDonut = () => {
-    if (!stats) return null;
-    const total = stats.total || 1;
-    const crit = stats.critical_count || 0;
-    const high = (stats.flagged_count || 0) - crit;
-    const safe = safeCount;
-    
-    // Convert to percentages
-    const critPct = (crit / total) * 100;
-    const highPct = (high / total) * 100;
-    // safe is remainder
-
-    // Circle circumference = 2 * PI * r = ~251.2 for r=40
-    const C = 251.2;
-    const critDash = (critPct / 100) * C;
-    const highDash = (highPct / 100) * C;
-
-    return (
-      <svg width="100" height="100" viewBox="0 0 100 100" className="-rotate-90">
-        {/* Safe base */}
-        <circle cx="50" cy="50" r="40" fill="transparent" stroke="var(--accent-green)" strokeWidth="8" />
-        {/* High / Amber */}
-        <circle cx="50" cy="50" r="40" fill="transparent" stroke="var(--warning)" strokeWidth="8" 
-                strokeDasharray={`${highDash + critDash} ${C}`} strokeDashoffset="0" />
-        {/* Critical / Red */}
-        <circle cx="50" cy="50" r="40" fill="transparent" stroke="var(--danger)" strokeWidth="8" 
-                strokeDasharray={`${critDash} ${C}`} strokeDashoffset="0" />
-      </svg>
-    );
-  };
-
   return (
     <div className="space-y-6">
       {/* ── TOP STAT CARDS ── */}
@@ -107,28 +142,28 @@ export default function Dashboard() {
         <div className="premium-card">
           <div className="flex items-center justify-between mb-4">
             <span className="caption">Total Transactions</span>
-            <Activity size={16} className="text-[var(--text-secondary)]" />
+            <Activity size={16} className="text-[var(--text-secondary)]" aria-hidden="true" />
           </div>
           {stats ? <div className="stat-number">{stats.total}</div> : <div className="skeleton w-16 h-8" />}
         </div>
         <div className="premium-card">
           <div className="flex items-center justify-between mb-4">
             <span className="caption">Flagged</span>
-            <AlertTriangle size={16} className="text-[var(--text-secondary)]" />
+            <AlertTriangle size={16} className="text-[var(--text-secondary)]" aria-hidden="true" />
           </div>
           {stats ? <div className="stat-number" style={{color: 'var(--danger)'}}>{stats.flagged_count}</div> : <div className="skeleton w-12 h-8" />}
         </div>
         <div className="premium-card">
           <div className="flex items-center justify-between mb-4">
             <span className="caption">Critical</span>
-            <ShieldAlert size={16} className="text-[var(--text-secondary)]" />
+            <ShieldAlert size={16} className="text-[var(--text-secondary)]" aria-hidden="true" />
           </div>
           {stats ? <div className="stat-number" style={{color: 'var(--warning)'}}>{stats.critical_count}</div> : <div className="skeleton w-10 h-8" />}
         </div>
         <div className="premium-card">
           <div className="flex items-center justify-between mb-4">
             <span className="caption">Safe</span>
-            <CheckCircle size={16} className="text-[var(--text-secondary)]" />
+            <CheckCircle size={16} className="text-[var(--text-secondary)]" aria-hidden="true" />
           </div>
           {stats ? <div className="stat-number" style={{color: 'var(--accent-green)'}}>{safeCount}</div> : <div className="skeleton w-16 h-8" />}
         </div>
@@ -140,8 +175,8 @@ export default function Dashboard() {
           <div className="p-6 border-b border-[var(--border)] flex justify-between items-center">
             <h3 className="card-title">Live Feed</h3>
             <div className="flex items-center gap-2">
-              <div className="live-dot" />
-              <span className="caption font-bold text-[var(--accent-green)]">LIVE</span>
+              <div className="live-dot" aria-hidden="true" />
+              <span className="caption font-bold text-[var(--accent-green)]" aria-live="polite">LIVE</span>
             </div>
           </div>
           
@@ -154,11 +189,11 @@ export default function Dashboard() {
               <table className="w-full text-left border-collapse">
                 <thead className="sticky top-0 bg-[var(--bg-card)] border-b border-[var(--border)]">
                   <tr>
-                    <th className="table-header py-3 px-6">Time</th>
-                    <th className="table-header py-3 px-6">Payer</th>
-                    <th className="table-header py-3 px-6 text-right">Amount</th>
-                    <th className="table-header py-3 px-6">Risk Score</th>
-                    <th className="table-header py-3 px-6">Tier</th>
+                    <th className="table-header py-3 px-6" scope="col">Time</th>
+                    <th className="table-header py-3 px-6" scope="col">Payer</th>
+                    <th className="table-header py-3 px-6 text-right" scope="col">Amount</th>
+                    <th className="table-header py-3 px-6" scope="col">Risk Score</th>
+                    <th className="table-header py-3 px-6" scope="col">Tier</th>
                   </tr>
                 </thead>
                 <tbody className="table-body">
@@ -167,14 +202,15 @@ export default function Dashboard() {
                       <tr 
                         onClick={() => setExpandedId(expandedId === txn.txn_id ? null : txn.txn_id)}
                         className={`cursor-pointer hover:bg-[var(--bg-card-hover)] transition-colors animate-row-enter ${idx !== 0 ? 'border-t border-[var(--border)] border-opacity-30' : ''}`}
+                        aria-expanded={expandedId === txn.txn_id}
                       >
-                        <td className="py-4 px-6 text-[var(--text-secondary)] whitespace-nowrap">
+                        <td className={`${rowPy} px-6 text-[var(--text-secondary)] whitespace-nowrap transition-all duration-200`}>
                           {new Date(txn.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'})}
                         </td>
-                        <td className="py-4 px-6 font-medium">{txn.payer_id}</td>
-                        <td className="py-4 px-6 amount text-right">₹{Number(txn.amount).toLocaleString('en-IN')}</td>
-                        <td className="py-4 px-6"><RiskBar score={txn.risk_score} /></td>
-                        <td className="py-4 px-6"><TierBadge tier={txn.risk_tier} /></td>
+                        <td className={`${rowPy} px-6 font-medium transition-all duration-200`}>{txn.payer_id}</td>
+                        <td className={`${rowPy} px-6 amount text-right transition-all duration-200`}>₹{Number(txn.amount).toLocaleString('en-IN')}</td>
+                        <td className={`${rowPy} px-6 transition-all duration-200`}><RiskBar score={txn.risk_score} /></td>
+                        <td className={`${rowPy} px-6 transition-all duration-200`}><TierBadge tier={txn.risk_tier} /></td>
                       </tr>
                       
                       {expandedId === txn.txn_id && (
@@ -220,7 +256,7 @@ export default function Dashboard() {
                   ))}
                   {transactions.length === 0 && (
                     <tr>
-                      <td colSpan="5" className="p-6 text-center caption">No transactions.</td>
+                      <td colSpan="5" className="p-6 text-center caption">No transactions yet. Use the Simulator to generate data.</td>
                     </tr>
                   )}
                 </tbody>
@@ -229,20 +265,21 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* ── SIGNAL HEATMAP ── */}
+        {/* ── SIGNAL HEATMAP + STACKED BAR ── */}
         <div className="w-[40%] premium-card flex flex-col">
           <h3 className="card-title mb-6">Signal Activity</h3>
           
+          {/* Top rules */}
           <div className="space-y-4 mb-8 flex-1">
             {!stats ? (
               [...Array(5)].map((_, i) => <div key={i} className="skeleton w-full h-6" />)
             ) : (
               stats.top_rules?.map((ruleObj, i) => (
                 <div key={i} className="flex items-center gap-3">
-                  <span className="text-xs font-medium w-24 truncate">{ruleObj.rule}</span>
+                  <span className="text-xs font-medium w-24 truncate text-[var(--text-secondary)]">{ruleObj.rule}</span>
                   <div className="flex-1 h-2 bg-[var(--border)] rounded-full overflow-hidden">
                     <div 
-                      className="h-full rounded-full" 
+                      className="h-full rounded-full transition-all duration-500" 
                       style={{ 
                         width: `${Math.min((ruleObj.count / (stats.flagged_count || 1)) * 100, 100)}%`,
                         background: 'var(--accent-purple)'
@@ -255,24 +292,11 @@ export default function Dashboard() {
             )}
           </div>
 
-          <div className="border-t border-[var(--border)] pt-6 flex items-center justify-center gap-8">
-            {renderDonut()}
-            <div className="space-y-2">
-              <div className="flex items-center gap-2 text-xs">
-                <span className="w-2 h-2 rounded-full bg-[var(--danger)]"></span>
-                <span className="text-[var(--text-secondary)]">Critical Risk</span>
-              </div>
-              <div className="flex items-center gap-2 text-xs">
-                <span className="w-2 h-2 rounded-full bg-[var(--warning)]"></span>
-                <span className="text-[var(--text-secondary)]">High Risk</span>
-              </div>
-              <div className="flex items-center gap-2 text-xs">
-                <span className="w-2 h-2 rounded-full bg-[var(--accent-green)]"></span>
-                <span className="text-[var(--text-secondary)]">Safe</span>
-              </div>
-            </div>
+          {/* ── STACKED BAR CHART (replaces donut) ── */}
+          <div className="border-t border-[var(--border)] pt-5">
+            <p className="text-[10px] uppercase tracking-widest text-[var(--text-tertiary)] mb-4">Risk Distribution</p>
+            <RiskStackedBar stats={stats} />
           </div>
-
         </div>
       </div>
     </div>
