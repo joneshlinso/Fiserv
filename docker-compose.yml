@@ -1,0 +1,85 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: upi-fraud-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: upi_fraud_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - upi-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: upi-fraud-redis
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    networks:
+      - upi-network
+
+  fraud-engine:
+    build:
+      context: ./fraud-engine
+      dockerfile: Dockerfile
+    container_name: upi-fraud-engine
+    restart: always
+    ports:
+      - "8000:8000"
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - PORT=8000
+    depends_on:
+      - redis
+    networks:
+      - upi-network
+
+  api-gateway:
+    build:
+      context: ./api-gateway
+      dockerfile: Dockerfile
+    container_name: upi-api-gateway
+    restart: always
+    ports:
+      - "5000:5000"
+    environment:
+      - PORT=5000
+      - DATABASE_URL=postgresql://postgres:password@postgres:5432/upi_fraud_db
+      - REDIS_URL=redis://redis:6379/0
+      - FRAUD_ENGINE_URL=http://fraud-engine:8000
+    depends_on:
+      - postgres
+      - redis
+      - fraud-engine
+    networks:
+      - upi-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: upi-frontend
+    restart: always
+    ports:
+      - "3000:80"
+    depends_on:
+      - api-gateway
+    networks:
+      - upi-network
+
+volumes:
+  pgdata:
+  redisdata:
+
+networks:
+  upi-network:
+    driver: bridge
